@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+.next/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+android/local.properties
+ios/Podfile.lock
+.firebase/
+*.iml
