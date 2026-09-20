@@ -1,4 +1,4 @@
-import {Language, NotificationType} from './index';
+import type {Language, NotificationType} from '../types';
 
 export const APP_NAME = 'DailyHire';
 export const APP_TAGLINE = 'Gaav ka Apna Rozgar App';
@@ -11,8 +11,8 @@ export const COLORS = {
   primaryLight: '#E8F5EC',
   accent: '#FACC15',
   accentDark: '#CA8A04',
-  background: '#F5F7F5F6',
-  success: '#166',
+  background: '#F5F7F5',
+  success: '#166534',
   danger: '#B91C1C',
   warning: '#B45309',
   text: '#17211B',
@@ -59,6 +59,7 @@ export const STORAGE_KEYS = {
 export const ENDPOINTS = {
   requestEmailOtp: 'requestEmailOtp',
   verifyEmailOtp: 'verifyEmailOtp',
+  searchJobs: 'searchJobs',
   saveFcmToken: 'saveFcmToken',
   adminOverview: 'adminOverview',
   adminUsers: 'adminUsers',

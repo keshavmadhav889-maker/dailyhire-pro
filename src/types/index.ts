@@ -97,7 +97,7 @@ export interface JobFilters {
 
 export interface JobPage {
   items: Job[];
-  nextCursor?: string;
+  nextCursor?: unknown;
   hasMore: boolean;
 }
 

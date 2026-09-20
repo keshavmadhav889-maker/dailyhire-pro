@@ -1,0 +1,59 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function activeUser(userId) {
+      return signedIn()
+        && exists(/databases/(default)/documents/users/$(userId))
+        && get(/databases/(default)/documents/users/$(userId)).data.isBlocked != true;
+    }
+
+    function validImage() {
+      return request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp'];
+    }
+
+    match /profilePhotos/{userId}/{fileName} {
+      allow read: if isActiveReader(userId);
+      allow create, update: if (isOwner(userId) || isAdmin())
+        && activeUser(userId)
+        && validImage();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /verificationDocuments/{userId}/{fileName} {
+      allow read, write: if false;
+    }
+
+    match /jobImages/{jobId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        || (signedIn()
+          && activeUser(request.auth.uid)
+          && request.auth.token.role == 'employer'
+          && exists(/databases/(default)/documents/jobs/$(jobId))
+          && get(/databases/(default)/documents/jobs/$(jobId)).data.employerId == request.auth.uid
+          && validImage());
+      allow delete: if isAdmin()
+        || (signedIn()
+          && request.auth.token.role == 'employer'
+          && exists(/databases/(default)/documents/jobs/$(jobId))
+          && get(/databases/(default)/documents/jobs/$(jobId)).data.employerId == request.auth.uid);
+    }
+
+    function isActiveReader(userId) {
+      return isOwner(userId) || isAdmin();
+    }
+  }
+}

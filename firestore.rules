@@ -1,0 +1,206 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function isEmployer() {
+      return signedIn() && request.auth.token.role == 'employer';
+    }
+
+    function isWorker() {
+      return signedIn() && request.auth.token.role == 'worker';
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function activeUser(userId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.isBlocked != true;
+    }
+
+    function isEmployerActor() {
+      return isEmployer() && activeUser(request.auth.uid);
+    }
+
+    function isWorkerActor() {
+      return isWorker() && activeUser(request.auth.uid);
+    }
+
+    function hasFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function validString(value, minimum, maximum) {
+      return value is string
+        && value.size() >= minimum
+        && value.size() <= maximum;
+    }
+
+    function validTimestamp(value) {
+      return value is timestamp;
+    }
+
+    function immutable(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (isOwner(userId) || isAdmin());
+      allow create: if isOwner(userId)
+        && request.auth.token.role == request.resource.data.role
+        && request.resource.data.uid == userId
+        && validString(request.resource.data.email, 3, 254)
+        && request.resource.data.role in ['employer', 'worker']
+        && request.resource.data.isBlocked == false
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.skills is list
+        && request.resource.data.preferredCategories is list;
+      allow update: if isAdmin()
+        || (isOwner(userId)
+          && immutable(['name', 'phone', 'profilePhoto', 'age', 'gender', 'address', 'location', 'skills', 'experience', 'preferredCategories', 'businessName', 'updatedAt'])
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.isBlocked == resource.data.isBlocked);
+      allow delete: if isAdmin();
+
+      match /fcmTokens/{tokenId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId)
+          && request.resource.data.token is string
+          && request.resource.data.token.size() <= 4096;
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    match /jobs/{jobId} {
+      allow read: if signedIn()
+        && activeUser(request.auth.uid)
+        && (isAdmin()
+          || resource.data.employerId == request.auth.uid
+          || resource.data.status in ['open', 'featured']);
+      allow create: if isEmployerActor()
+        && request.resource.data.jobId == jobId
+        && request.resource.data.employerId == request.auth.uid
+        && request.resource.data.status in ['draft', 'open']
+        && validString(request.resource.data.title, 3, 120)
+        && request.resource.data.category is string
+        && validString(request.resource.data.description, 10, 2000)
+        && validString(request.resource.data.location, 2, 200)
+        && request.resource.data.salary is number
+        && request.resource.data.salary > 0
+        && request.resource.data.salary <= 1000000
+        && request.resource.data.salaryUnit in ['daily', 'hourly', 'fixed']
+        && validString(request.resource.data.workingHours, 2, 100)
+        && request.resource.data.workersNeeded is number
+        && request.resource.data.workersNeeded >= 1
+        && request.resource.data.workersNeeded <= 100
+        && request.resource.data.startDate is timestamp
+        && request.resource.data.contactNumber is string
+        && request.resource.data.featured == false
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+      allow update: if isAdmin()
+        || (isEmployerActor()
+          && resource.data.employerId == request.auth.uid
+          && request.resource.data.employerId == resource.data.employerId
+          && request.resource.data.jobId == resource.data.jobId
+          && immutable(['title', 'category', 'description', 'location', 'salary', 'salaryUnit', 'workingHours', 'workersNeeded', 'startDate', 'contactNumber', 'status', 'featured', 'imageUrl', 'updatedAt'])
+          && request.resource.data.salary is number
+          && request.resource.data.salary > 0
+          && request.resource.data.salary <= 1000000
+          && request.resource.data.workersNeeded is number
+          && request.resource.data.workersNeeded >= 1
+          && request.resource.data.workersNeeded <= 100);
+      allow delete: if isAdmin() || (isEmployerActor() && resource.data.employerId == request.auth.uid);
+
+      match /applicants/{applicationId} {
+        allow read: if isAdmin()
+          || (isEmployerActor() && resource.data.employerId == request.auth.uid)
+          || (isWorkerActor() && resource.data.workerId == request.auth.uid);
+      }
+    }
+
+    match /applications/{applicationId} {
+      allow read: if signedIn()
+        && activeUser(request.auth.uid)
+        && (isAdmin()
+          || resource.data.workerId == request.auth.uid
+          || resource.data.employerId == request.auth.uid);
+      allow create: if isWorkerActor()
+        && request.resource.data.applicationId == applicationId
+        && request.resource.data.applicationId == request.resource.data.jobId + ':' + request.resource.data.workerId
+        && request.resource.data.jobId is string
+        && request.resource.data.workerId == request.auth.uid
+        && request.resource.data.employerId == get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.employerId
+        && get(/databases/$(database)/documents/jobs/$(request.resource.data.jobId)).data.status in ['open', 'featured']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.appliedAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+      allow update: if isAdmin()
+        || (isWorkerActor()
+          && resource.data.workerId == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && immutable(['status', 'updatedAt']))
+        || (isEmployerActor()
+          && resource.data.employerId == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['accepted', 'rejected']
+          && immutable(['status', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if signedIn()
+        && activeUser(request.auth.uid)
+        && (isAdmin() || resource.data.recipientUid == request.auth.uid);
+      allow create: if false;
+      allow update: if isOwner(resource.data.recipientUid)
+        && request.resource.data.recipientUid == resource.data.recipientUid
+        && request.resource.data.read == true
+        && resource.data.read == false
+        && immutable(['read']);
+      allow delete: if isAdmin() || isOwner(resource.data.recipientUid);
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.reportedBy == request.auth.uid);
+      allow create: if signedIn()
+        && activeUser(request.auth.uid)
+        && request.resource.data.reportId == reportId
+        && request.resource.data.reportedBy == request.auth.uid
+        && request.resource.data.targetUid is string
+        && request.resource.data.targetUid != request.auth.uid
+        && validString(request.resource.data.reason, 3, 500)
+        && request.resource.data.status == 'open'
+        && request.resource.data.createdAt is timestamp;
+      allow update: if isAdmin()
+        && immutable(['status', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /otpChallenges/{challengeId} {
+      allow read, write: if false;
+    }
+
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
+    }
+  }
+}
